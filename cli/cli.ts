@@ -159,6 +159,17 @@ const commands: Command[] = [
       out(await client.deleteBases(ids));
     },
   },
+  {
+    name: "bases schema",
+    summary:
+      "Get the complete structural map of a base in one shot: all tables, all columns (with parsed config, options, primary flag, width), all inter-table relationships (LINK/LOOKUP/ROLLUP), per-table row counts, and any external tables referenced by LINK columns. No row/cell data is included — designed to give an AI agent the full picture of how the base is structured.",
+    usage: "airtable bases schema --id <id>",
+    run: async (args) => {
+      const { values } = parseArgs({ args, options: { id: { type: "string" } }, strict: true });
+      const id = parseIntArg("--id", values.id);
+      out(await client.getBaseSchema(id));
+    },
+  },
 
   // --- tables ------------------------------------------------------------
   {

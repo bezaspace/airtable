@@ -219,6 +219,8 @@ export const client = {
   deleteBase: (id: number) => request("DELETE", `/api/bases/${id}`),
   deleteBases: (ids: number[]) =>
     request("DELETE", "/api/bases", { ids }) as Promise<BulkDeleteResult>,
+  getBaseSchema: (id: number) =>
+    request("GET", `/api/bases/${id}/schema`) as Promise<unknown>,
 
   // Tables
   listTables: (baseId: number) =>

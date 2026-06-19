@@ -844,3 +844,220 @@ export function getTablesBulk(
     return { tableId: id, found: data !== null, data };
   });
 }
+
+// ---------------------------------------------------------------------------
+// Base schema: full structural map of a base (no row data)
+// ---------------------------------------------------------------------------
+
+/** A column as it appears in the base schema payload. */
+export interface SchemaColumn {
+  id: number;
+  name: string;
+  type: ColumnType;
+  isPrimary: boolean;
+  sortOrder: number;
+  width: number;
+  config: ColumnConfig;
+  /** Options for SELECT / MULTI_SELECT columns. */
+  options?: ResolvedOption[];
+  /** LINK: the target table id (from config). */
+  targetTableId?: number;
+  /** LOOKUP / ROLLUP: the source link column id. */
+  linkColumnId?: number;
+  /** LOOKUP / ROLLUP: the target column id being read/aggregated. */
+  targetColumnId?: number;
+  /** ROLLUP: the aggregation function. */
+  aggregation?: string;
+}
+
+/** A table as it appears in the base schema payload. */
+export interface SchemaTable {
+  id: number;
+  name: string;
+  createdAt: string;
+  rowCount: number;
+  primaryColumnId: number | null;
+  columns: SchemaColumn[];
+}
+
+/**
+ * A resolved relationship between two tables via a LINK column.
+ * Direction is "source -> target" as defined by the LINK column config.
+ */
+export interface SchemaRelationship {
+  linkColumnId: number;
+  linkColumnName: string;
+  sourceTableId: number;
+  sourceTableName: string;
+  targetTableId: number;
+  targetTableName: string;
+  /** Number of actual link records (edges) currently stored. */
+  linkCount: number;
+}
+
+/** The complete structural map of a base, with no row data. */
+export interface BaseSchema {
+  base: { id: number; name: string; createdAt: string };
+  tableCount: number;
+  tables: SchemaTable[];
+  /** All inter-table relationships resolved to names. */
+  relationships: SchemaRelationship[];
+  /** Tables referenced by LINK columns that do not belong to this base. */
+  externalTables: { id: number; name: string; baseId: number; baseName: string }[];
+}
+
+/**
+ * Return the complete schema/structure of a base: every table, every column
+ * (with parsed config, options, primary flag), all inter-table relationships,
+ * and per-table row counts. No row/cell data is included.
+ */
+export function getBaseSchema(baseId: number): BaseSchema | null {
+  const base = db.prepare("SELECT * FROM bases WHERE id = ?").get(baseId) as Base | undefined;
+  if (!base) return null;
+
+  const tables = db
+    .prepare("SELECT * FROM tables WHERE base_id = ? ORDER BY id ASC")
+    .all(baseId) as Table[];
+
+  // Per-table row counts in one pass.
+  const rowCountRows = db
+    .prepare(
+      "SELECT table_id, COUNT(*) as c FROM rows WHERE table_id IN (SELECT id FROM tables WHERE base_id = ?) GROUP BY table_id"
+    )
+    .all(baseId) as { table_id: number; c: number }[];
+  const rowCountByTable: Record<number, number> = {};
+  for (const r of rowCountRows) rowCountByTable[r.table_id] = r.c;
+
+  // All columns for this base in one query.
+  const tableIds = tables.map((t) => t.id);
+  const allColumns: Column[] =
+    tableIds.length === 0
+      ? []
+      : (db
+          .prepare(
+            `SELECT * FROM columns WHERE table_id IN (${tableIds.map(() => "?").join(",")}) ORDER BY table_id ASC, sort_order ASC, id ASC`
+          )
+          .all(...tableIds) as Column[]);
+
+  const columnsByTable: Record<number, Column[]> = {};
+  for (const c of allColumns) (columnsByTable[c.table_id] ??= []).push(c);
+
+  // All options for SELECT / MULTI_SELECT columns in this base, in one query.
+  const selectColIds = allColumns.filter((c) => c.type === "SELECT" || c.type === "MULTI_SELECT").map((c) => c.id);
+  const optionsByColumn: Record<number, ResolvedOption[]> = {};
+  if (selectColIds.length > 0) {
+    const opts = db
+      .prepare(
+        `SELECT column_id, id, value, color FROM column_options WHERE column_id IN (${selectColIds.map(() => "?").join(",")}) ORDER BY sort_order ASC, id ASC`
+      )
+      .all(...selectColIds) as { column_id: number; id: number; value: string; color: string | null }[];
+    for (const o of opts) {
+      (optionsByColumn[o.column_id] ??= []).push({ id: o.id, value: o.value, color: o.color });
+    }
+  }
+
+  // Link counts per link column (number of edges currently stored).
+  const linkColIds = allColumns.filter((c) => c.type === "LINK").map((c) => c.id);
+  const linkCountByColumn: Record<number, number> = {};
+  if (linkColIds.length > 0) {
+    const counts = db
+      .prepare(
+        `SELECT link_column_id, COUNT(*) as c FROM links WHERE link_column_id IN (${linkColIds.map(() => "?").join(",")}) GROUP BY link_column_id`
+      )
+      .all(...linkColIds) as { link_column_id: number; c: number }[];
+    for (const r of counts) linkCountByColumn[r.link_column_id] = r.c;
+  }
+
+  // Build the tables payload.
+  const schemaTables: SchemaTable[] = tables.map((t) => {
+    const cols = columnsByTable[t.id] ?? [];
+    const primary = cols.find((c) => c.is_primary === 1) ?? null;
+    const schemaCols: SchemaColumn[] = cols.map((col) => {
+      const cfg = parseConfig(col.config);
+      const out: SchemaColumn = {
+        id: col.id,
+        name: col.name,
+        type: col.type,
+        isPrimary: col.is_primary === 1,
+        sortOrder: col.sort_order,
+        width: col.width,
+        config: cfg,
+      };
+      if (col.type === "SELECT" || col.type === "MULTI_SELECT") {
+        out.options = optionsByColumn[col.id] ?? [];
+      }
+      if (col.type === "LINK") {
+        const lc = cfg as LinkConfig | null;
+        out.targetTableId = lc?.targetTableId;
+      }
+      if (col.type === "LOOKUP" || col.type === "ROLLUP") {
+        const lc = cfg as LookupConfig | RollupConfig | null;
+        out.linkColumnId = lc?.linkColumnId;
+        out.targetColumnId = lc?.targetColumnId;
+        if (col.type === "ROLLUP") {
+          out.aggregation = (cfg as RollupConfig | null)?.aggregation;
+        }
+      }
+      return out;
+    });
+    return {
+      id: t.id,
+      name: t.name,
+      createdAt: t.created_at,
+      rowCount: rowCountByTable[t.id] ?? 0,
+      primaryColumnId: primary?.id ?? null,
+      columns: schemaCols,
+    };
+  });
+
+  // Build relationships and collect external target tables.
+  const tableNameById = new Map<number, string>(tables.map((t) => [t.id, t.name]));
+  const relationships: SchemaRelationship[] = [];
+  const externalTableIds = new Set<number>();
+
+  for (const t of schemaTables) {
+    for (const col of t.columns) {
+      if (col.type !== "LINK" || col.targetTableId === undefined) continue;
+      const targetId = col.targetTableId;
+      const targetName = tableNameById.get(targetId);
+      if (targetName === undefined) {
+        // Target table lives in another base.
+        externalTableIds.add(targetId);
+      }
+      relationships.push({
+        linkColumnId: col.id,
+        linkColumnName: col.name,
+        sourceTableId: t.id,
+        sourceTableName: t.name,
+        targetTableId: targetId,
+        targetTableName: targetName ?? `#${targetId}`,
+        linkCount: linkCountByColumn[col.id] ?? 0,
+      });
+    }
+  }
+
+  // Resolve external tables (LINK targets in other bases) to names + base info.
+  let externalTables: BaseSchema["externalTables"] = [];
+  if (externalTableIds.size > 0) {
+    const ids = [...externalTableIds];
+    const rows = db
+      .prepare(
+        `SELECT t.id, t.name, t.base_id, b.name as base_name FROM tables t JOIN bases b ON b.id = t.base_id WHERE t.id IN (${ids.map(() => "?").join(",")})`
+      )
+      .all(...ids) as { id: number; name: string; base_id: number; base_name: string }[];
+    externalTables = rows.map((r) => ({
+      id: r.id,
+      name: r.name,
+      baseId: r.base_id,
+      baseName: r.base_name,
+    }));
+  }
+
+  return {
+    base: { id: base.id, name: base.name, createdAt: base.created_at },
+    tableCount: tables.length,
+    tables: schemaTables,
+    relationships,
+    externalTables,
+  };
+}
