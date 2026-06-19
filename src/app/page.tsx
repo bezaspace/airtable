@@ -1,4 +1,5 @@
 import { AppSidebar } from "@/components/app-sidebar";
+import { SidebarShell } from "@/components/sidebar-shell";
 import { TableGrid } from "@/components/table-grid";
 import { listBases, listTables, getTableData } from "@/lib/queries";
 
@@ -40,12 +41,14 @@ export default async function HomePage({ searchParams }: PageProps) {
 
   return (
     <div className="flex flex-1 h-full overflow-hidden">
-      <AppSidebar
-        bases={bases}
-        initialTables={tablesByBase}
-        selectedBaseId={selectedBaseId}
-        selectedTableId={selectedTableId}
-      />
+      <SidebarShell>
+        <AppSidebar
+          bases={bases}
+          initialTables={tablesByBase}
+          selectedBaseId={selectedBaseId}
+          selectedTableId={selectedTableId}
+        />
+      </SidebarShell>
       <main className="flex-1 min-w-0 bg-background">
         {selectedTableData ? (
           <TableGrid key={selectedTableData.table.id} initialData={selectedTableData} />

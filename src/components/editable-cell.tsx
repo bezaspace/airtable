@@ -163,7 +163,7 @@ function ReadView({
     return (
       <div
         onClick={onStartEdit}
-        className="w-full h-full px-3 py-2 text-sm cursor-pointer flex flex-wrap gap-1 items-center"
+        className="w-full min-h-full px-3 py-2 text-sm cursor-pointer flex flex-wrap gap-1 items-center"
       >
         {values.length === 0 ? (
           <span className="text-muted-foreground">Empty</span>
@@ -227,7 +227,7 @@ function ReadView({
     return (
       <div
         onClick={onStartEdit}
-        className="w-full h-full px-3 py-2 text-sm cursor-pointer truncate whitespace-pre-wrap"
+        className="w-full min-h-full px-3 py-2 text-sm cursor-pointer whitespace-pre-wrap break-words"
       >
         {value}
       </div>
@@ -238,7 +238,7 @@ function ReadView({
   return (
     <div
       onClick={onStartEdit}
-      className="w-full h-full px-3 py-2 text-sm text-foreground truncate cursor-text"
+      className="w-full min-h-full px-3 py-2 text-sm text-foreground truncate cursor-text"
     >
       {value ?? <span className="text-muted-foreground">Empty</span>}
     </div>

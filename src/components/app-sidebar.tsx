@@ -122,7 +122,7 @@ export function AppSidebar({
   }
 
   return (
-    <aside className="w-64 border-r border-border bg-card flex flex-col h-full shrink-0">
+    <aside className="w-full border-r border-border bg-card flex flex-col h-full shrink-0">
       <div className="flex items-center justify-between px-4 py-3 border-b border-border">
         <div className="flex items-center gap-2 text-sm font-semibold text-card-foreground">
           <Database className="h-4 w-4" />

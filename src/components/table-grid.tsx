@@ -31,6 +31,7 @@ import {
 import { api } from "@/lib/api-client";
 import { EditableCell, CheckboxCell } from "@/components/editable-cell";
 import { LinkedCell, getTargetRows, invalidateTargetRowsCache } from "@/components/linked-cell";
+import { CellWrapper } from "@/components/cell-wrapper";
 import type {
   TableData,
   ColumnType,
@@ -50,6 +51,10 @@ interface FilterState {
   columnId: number | null;
   value: string;
 }
+
+/** Uniform row height (px). Cells never grow beyond this unless the user
+ * explicitly resizes the row. Overflowing content pops over on hover. */
+const ROW_HEIGHT = 36;
 
 export function TableGrid({ initialData }: TableGridProps) {
   const [data, setData] = useState<TableData>(initialData);
@@ -335,48 +340,79 @@ export function TableGrid({ initialData }: TableGridProps) {
     if (COMPUTED_TYPES.includes(column.type)) {
       const val = row.computed[column.id] ?? null;
       return (
-        <div className="w-full h-full px-3 py-2 text-sm text-muted-foreground truncate">
-          {val ?? <span className="text-muted-foreground/50">—</span>}
-        </div>
+        <CellWrapper height={ROW_HEIGHT} label={column.name}>
+          <div className="w-full h-full px-3 py-2 text-sm text-muted-foreground truncate">
+            {val ?? <span className="text-muted-foreground/50">—</span>}
+          </div>
+        </CellWrapper>
       );
     }
 
     if (column.type === "LINK") {
       const links = row.links[column.id] ?? [];
       const targetRows = targetRowsByLink[column.id] ?? [];
+      const expanded = (
+        <div className="flex flex-wrap gap-1.5 items-center">
+          {links.length === 0 ? (
+            <span className="text-muted-foreground text-sm">No links</span>
+          ) : (
+            links.map((l) => (
+              <span
+                key={l.linkId}
+                className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-primary/15 text-primary text-xs font-medium"
+              >
+                {l.targetLabel}
+              </span>
+            ))
+          )}
+        </div>
+      );
       return (
-        <LinkedCell
-          rowId={row.row.id}
-          linkColumnId={column.id}
-          targetTableId={column.targetTableId!}
-          targetTableName={data.relatedTables[column.targetTableId!] ?? "rows"}
-          links={links}
-          targetRows={targetRows}
-          onUpdate={refresh}
-        />
+        <CellWrapper height={ROW_HEIGHT} label={column.name} expandedContent={expanded}>
+          <LinkedCell
+            rowId={row.row.id}
+            linkColumnId={column.id}
+            targetTableId={column.targetTableId!}
+            targetTableName={data.relatedTables[column.targetTableId!] ?? "rows"}
+            links={links}
+            targetRows={targetRows}
+            onUpdate={refresh}
+          />
+        </CellWrapper>
       );
     }
 
     if (column.type === "CHECKBOX") {
       return (
-        <CheckboxCell
-          rowId={row.row.id}
-          columnId={column.id}
-          value={row.cells[column.id] ?? null}
-          onUpdate={(v) => handleCellUpdate(row.row.id, column.id, v)}
-        />
+        <CellWrapper height={ROW_HEIGHT} enableExpand={false}>
+          <CheckboxCell
+            rowId={row.row.id}
+            columnId={column.id}
+            value={row.cells[column.id] ?? null}
+            onUpdate={(v) => handleCellUpdate(row.row.id, column.id, v)}
+          />
+        </CellWrapper>
       );
     }
 
+    // For LONG_TEXT / TEXT we want the dialog to show the full untruncated value.
+    const rawValue = row.cells[column.id] ?? null;
+    const expanded =
+      column.type === "LONG_TEXT" && rawValue ? (
+        <div className="whitespace-pre-wrap break-words">{rawValue}</div>
+      ) : undefined;
+
     return (
-      <EditableCell
-        rowId={row.row.id}
-        columnId={column.id}
-        type={column.type}
-        initialValue={row.cells[column.id] ?? null}
-        options={column.options}
-        onUpdate={(v) => handleCellUpdate(row.row.id, column.id, v)}
-      />
+      <CellWrapper height={ROW_HEIGHT} label={column.name} expandedContent={expanded}>
+        <EditableCell
+          rowId={row.row.id}
+          columnId={column.id}
+          type={column.type}
+          initialValue={rawValue}
+          options={column.options}
+          onUpdate={(v) => handleCellUpdate(row.row.id, column.id, v)}
+        />
+      </CellWrapper>
     );
   }
 
@@ -753,8 +789,8 @@ export function TableGrid({ initialData }: TableGridProps) {
               </tr>
             )}
             {visibleRows.map((row, rowIndex) => (
-              <tr key={row.row.id} className="hover:bg-accent/30 group">
-                <td className="border-b border-r border-border bg-muted/30 text-center text-xs text-muted-foreground w-10">
+              <tr key={row.row.id} className="hover:bg-accent/30 group" style={{ height: ROW_HEIGHT }}>
+                <td className="border-b border-r border-border bg-muted/30 text-center text-xs text-muted-foreground w-10 align-middle">
                   <div className="flex items-center justify-center h-full">
                     {rowIndex + 1}
                     <Button
@@ -770,7 +806,7 @@ export function TableGrid({ initialData }: TableGridProps) {
                 {data.columns.map((column) => (
                   <td
                     key={column.id}
-                    className="border-b border-r border-border relative align-top"
+                    className="border-b border-r border-border relative align-top p-0"
                     style={{ width: column.width, minWidth: column.width }}
                   >
                     {renderCell(row, column)}
