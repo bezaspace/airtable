@@ -17,6 +17,7 @@ import {
   type RowInput,
   type CellUpdateInput,
   type ColumnType,
+  type ColumnConfig,
 } from "./client";
 
 // ---------------------------------------------------------------------------
@@ -134,6 +135,21 @@ const commands: Command[] = [
     },
   },
   {
+    name: "bases rename",
+    summary: "Rename a base by id.",
+    usage: 'airtable bases rename --id <id> --name "New Name"',
+    run: async (args) => {
+      const { values } = parseArgs({
+        args,
+        options: { id: { type: "string" }, name: { type: "string" } },
+        strict: true,
+      });
+      const id = parseIntArg("--id", values.id);
+      if (!values.name) fail("--name is required", "missing_arg", EXIT_VALIDATION);
+      out(await client.renameBase(id, values.name));
+    },
+  },
+  {
     name: "bases delete-many",
     summary: "Delete multiple bases by id (bulk). Returns { deleted, missing }.",
     usage: "airtable bases delete-many --ids 1,2,3",
@@ -153,6 +169,27 @@ const commands: Command[] = [
       const { values } = parseArgs({ args, options: { "base-id": { type: "string" } }, strict: true });
       const baseId = parseIntArg("--base-id", values["base-id"]);
       out(await client.listTables(baseId));
+    },
+  },
+  {
+    name: "tables list-all",
+    summary: "List all tables across all bases (useful for LINK column target selection).",
+    usage: "airtable tables list-all",
+    run: async () => out(await client.listAllTables()),
+  },
+  {
+    name: "tables rename",
+    summary: "Rename a table by id.",
+    usage: 'airtable tables rename --id <id> --name "New Name"',
+    run: async (args) => {
+      const { values } = parseArgs({
+        args,
+        options: { id: { type: "string" }, name: { type: "string" } },
+        strict: true,
+      });
+      const id = parseIntArg("--id", values.id);
+      if (!values.name) fail("--name is required", "missing_arg", EXIT_VALIDATION);
+      out(await client.renameTable(id, values.name));
     },
   },
   {
@@ -225,26 +262,58 @@ const commands: Command[] = [
   // --- columns -----------------------------------------------------------
   {
     name: "columns create",
-    summary: "Add one column to a table. Type is TEXT or NUMBER.",
-    usage: 'airtable columns create --table-id <id> --name "Due Date" --type TEXT',
+    summary:
+      "Add one column to a table. Type is one of: TEXT, NUMBER, LONG_TEXT, CHECKBOX, SELECT, MULTI_SELECT, DATE, URL, EMAIL, LINK. For SELECT/MULTI_SELECT, pass --options as a JSON string array. For LINK, pass --config '{\"targetTableId\":<id>}'.",
+    usage:
+      'airtable columns create --table-id <id> --name "Status" --type SELECT --options \'["Todo","Done"]\'\nairtable columns create --table-id <id> --name "Owner" --type LINK --config \'{"targetTableId":3}\'',
     run: async (args) => {
       const { values } = parseArgs({
         args,
-        options: { "table-id": { type: "string" }, name: { type: "string" }, type: { type: "string" } },
+        options: {
+          "table-id": { type: "string" },
+          name: { type: "string" },
+          type: { type: "string" },
+          config: { type: "string" },
+          options: { type: "string" },
+        },
         strict: true,
       });
       const tableId = parseIntArg("--table-id", values["table-id"]);
       if (!values.name) fail("--name is required", "missing_arg", EXIT_VALIDATION);
-      if (values.type !== "TEXT" && values.type !== "NUMBER") {
-        fail("--type must be TEXT or NUMBER", "bad_arg", EXIT_VALIDATION);
+      if (!values.type) fail("--type is required", "missing_arg", EXIT_VALIDATION);
+
+      const validTypes = [
+        "TEXT", "NUMBER", "LONG_TEXT", "CHECKBOX", "SELECT", "MULTI_SELECT",
+        "DATE", "URL", "EMAIL", "LINK", "LOOKUP", "ROLLUP",
+      ];
+      if (!validTypes.includes(values.type)) {
+        fail(`--type must be one of: ${validTypes.join(", ")}`, "bad_arg", EXIT_VALIDATION);
       }
-      out(await client.createColumn(tableId, values.name, values.type as ColumnType));
+      const type = values.type as ColumnType;
+
+      let config: ColumnConfig | undefined;
+      if (values.config !== undefined) {
+        config = parseJsonArg("--config", values.config) as ColumnConfig;
+      }
+
+      let options: string[] | undefined;
+      if (values.options !== undefined) {
+        const parsed = parseJsonArg("--options", values.options);
+        if (!Array.isArray(parsed)) {
+          fail("--options must be a JSON array of strings", "bad_arg", EXIT_VALIDATION);
+        }
+        options = parsed as string[];
+      }
+
+      out(await client.createColumn(tableId, values.name, type, config, options));
     },
   },
   {
     name: "columns create-many",
-    summary: "Add multiple columns to a table in one call (bulk). --columns is a JSON array of { name, type }.",
-    usage: 'airtable columns create-many --table-id <id> --columns \'[{"name":"Price","type":"NUMBER"},{"name":"SKU","type":"TEXT"}]\'',
+    summary:
+      "Add multiple columns to a table in one call (bulk). --columns is a JSON array of { name, type, config?, options? }.",
+    usage:
+      'airtable columns create-many --table-id <id> --columns \'[{"name":"Price","type":"NUMBER"},{"name":"Status","type":"SELECT","options":["A","B"]}]\'',
     run: async (args) => {
       const { values } = parseArgs({
         args,
@@ -256,18 +325,92 @@ const commands: Command[] = [
       if (!Array.isArray(parsed)) {
         fail("--columns must be a JSON array of { name, type } objects", "bad_arg", EXIT_VALIDATION);
       }
-      const cols: { name: string; type: ColumnType }[] = [];
+      const cols: {
+        name: string;
+        type: ColumnType;
+        config?: ColumnConfig;
+        options?: string[];
+      }[] = [];
+      const validTypes = [
+        "TEXT", "NUMBER", "LONG_TEXT", "CHECKBOX", "SELECT", "MULTI_SELECT",
+        "DATE", "URL", "EMAIL", "LINK", "LOOKUP", "ROLLUP",
+      ];
       for (let i = 0; i < parsed.length; i++) {
-        const c = parsed[i] as { name?: unknown; type?: unknown };
+        const c = parsed[i] as {
+          name?: unknown;
+          type?: unknown;
+          config?: unknown;
+          options?: unknown;
+        };
         if (typeof c?.name !== "string" || !c.name.trim()) {
           fail(`columns[${i}].name must be a non-empty string`, "bad_arg", EXIT_VALIDATION);
         }
-        if (c?.type !== "TEXT" && c?.type !== "NUMBER") {
-          fail(`columns[${i}].type must be TEXT or NUMBER`, "bad_arg", EXIT_VALIDATION);
+        if (typeof c?.type !== "string" || !validTypes.includes(c.type)) {
+          fail(`columns[${i}].type must be one of: ${validTypes.join(", ")}`, "bad_arg", EXIT_VALIDATION);
         }
-        cols.push({ name: c.name, type: c.type as ColumnType });
+        cols.push({
+          name: c.name,
+          type: c.type as ColumnType,
+          config: c.config as ColumnConfig | undefined,
+          options: Array.isArray(c.options) ? (c.options as string[]) : undefined,
+        });
       }
       out(await client.createColumnsBulk(tableId, cols));
+    },
+  },
+  {
+    name: "columns rename",
+    summary: "Rename a column by id.",
+    usage: 'airtable columns rename --id <id> --name "New Name"',
+    run: async (args) => {
+      const { values } = parseArgs({
+        args,
+        options: { id: { type: "string" }, name: { type: "string" } },
+        strict: true,
+      });
+      const id = parseIntArg("--id", values.id);
+      if (!values.name) fail("--name is required", "missing_arg", EXIT_VALIDATION);
+      out(await client.renameColumn(id, values.name));
+    },
+  },
+  {
+    name: "columns set-width",
+    summary: "Set a column's width in pixels (60-800).",
+    usage: "airtable columns set-width --id <id> --width 240",
+    run: async (args) => {
+      const { values } = parseArgs({
+        args,
+        options: { id: { type: "string" }, width: { type: "string" } },
+        strict: true,
+      });
+      const id = parseIntArg("--id", values.id);
+      const width = parseIntArg("--width", values.width);
+      out(await client.setColumnWidth(id, width));
+    },
+  },
+  {
+    name: "columns set-primary",
+    summary: "Mark a column as the primary field for its table (row label).",
+    usage: "airtable columns set-primary --id <id>",
+    run: async (args) => {
+      const { values } = parseArgs({ args, options: { id: { type: "string" } }, strict: true });
+      const id = parseIntArg("--id", values.id);
+      out(await client.setColumnPrimary(id));
+    },
+  },
+  {
+    name: "columns reorder",
+    summary: "Reorder columns in a table. --order is a comma-separated list of column ids in the desired order.",
+    usage: "airtable columns reorder --table-id <id> --order 5,3,1,2,4",
+    run: async (args) => {
+      const { values } = parseArgs({
+        args,
+        options: { "table-id": { type: "string" }, order: { type: "string" } },
+        strict: true,
+      });
+      const tableId = parseIntArg("--table-id", values["table-id"]);
+      const order = parseIntListArg("--order", values.order);
+      out(await client.reorderColumns(tableId, order));
     },
   },
   {
@@ -294,6 +437,119 @@ const commands: Command[] = [
       const tableId = parseIntArg("--table-id", values["table-id"]);
       const ids = parseIntListArg("--ids", values.ids);
       out(await client.deleteColumns(tableId, ids));
+    },
+  },
+
+  // --- column options ----------------------------------------------------
+  {
+    name: "options list",
+    summary: "List options for a SELECT or MULTI_SELECT column.",
+    usage: "airtable options list --column-id <id>",
+    run: async (args) => {
+      const { values } = parseArgs({
+        args,
+        options: { "column-id": { type: "string" } },
+        strict: true,
+      });
+      const colId = parseIntArg("--column-id", values["column-id"]);
+      out(await client.listColumnOptions(colId));
+    },
+  },
+  {
+    name: "options add",
+    summary: "Add an option to a SELECT or MULTI_SELECT column. --color is optional (hex or CSS color).",
+    usage: 'airtable options add --column-id <id> --value "High Priority" --color "#ef4444"',
+    run: async (args) => {
+      const { values } = parseArgs({
+        args,
+        options: {
+          "column-id": { type: "string" },
+          value: { type: "string" },
+          color: { type: "string" },
+        },
+        strict: true,
+      });
+      const colId = parseIntArg("--column-id", values["column-id"]);
+      if (!values.value) fail("--value is required", "missing_arg", EXIT_VALIDATION);
+      out(await client.addColumnOption(colId, values.value, values.color));
+    },
+  },
+  {
+    name: "options delete",
+    summary: "Delete an option by its id.",
+    usage: "airtable options delete --column-id <id> --option-id <id>",
+    run: async (args) => {
+      const { values } = parseArgs({
+        args,
+        options: { "column-id": { type: "string" }, "option-id": { type: "string" } },
+        strict: true,
+      });
+      const colId = parseIntArg("--column-id", values["column-id"]);
+      const optId = parseIntArg("--option-id", values["option-id"]);
+      await client.deleteColumnOption(colId, optId);
+      out({ deleted: true, optionId: optId });
+    },
+  },
+
+  // --- links -------------------------------------------------------------
+  {
+    name: "links add",
+    summary: "Link a source row to a target row via a LINK column.",
+    usage: "airtable links add --link-column-id <id> --source-row-id <id> --target-row-id <id>",
+    run: async (args) => {
+      const { values } = parseArgs({
+        args,
+        options: {
+          "link-column-id": { type: "string" },
+          "source-row-id": { type: "string" },
+          "target-row-id": { type: "string" },
+        },
+        strict: true,
+      });
+      const linkColId = parseIntArg("--link-column-id", values["link-column-id"]);
+      const srcId = parseIntArg("--source-row-id", values["source-row-id"]);
+      const tgtId = parseIntArg("--target-row-id", values["target-row-id"]);
+      out(await client.addLink(linkColId, srcId, tgtId));
+    },
+  },
+  {
+    name: "links remove",
+    summary: "Remove a link by its id, or by its ends (--link-column-id + --source-row-id + --target-row-id).",
+    usage:
+      "airtable links remove --link-id <id>\nairtable links remove --link-column-id <id> --source-row-id <id> --target-row-id <id>",
+    run: async (args) => {
+      const { values } = parseArgs({
+        args,
+        options: {
+          "link-id": { type: "string" },
+          "link-column-id": { type: "string" },
+          "source-row-id": { type: "string" },
+          "target-row-id": { type: "string" },
+        },
+        strict: true,
+      });
+      if (values["link-id"] !== undefined) {
+        const linkId = parseIntArg("--link-id", values["link-id"]);
+        await client.removeLink(linkId);
+        out({ deleted: true, linkId });
+        return;
+      }
+      if (
+        values["link-column-id"] === undefined ||
+        values["source-row-id"] === undefined ||
+        values["target-row-id"] === undefined
+      ) {
+        fail(
+          "Provide either --link-id, or all of --link-column-id, --source-row-id, --target-row-id",
+          "missing_arg",
+          EXIT_VALIDATION
+        );
+      }
+      const linkColId = parseIntArg("--link-column-id", values["link-column-id"]);
+      const srcId = parseIntArg("--source-row-id", values["source-row-id"]);
+      const tgtId = parseIntArg("--target-row-id", values["target-row-id"]);
+      await client.removeLinkByEnds(linkColId, srcId, tgtId);
+      out({ deleted: true, linkColumnId: linkColId, sourceRowId: srcId, targetRowId: tgtId });
     },
   },
 

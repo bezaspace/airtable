@@ -6,6 +6,9 @@ import type {
   Cell,
   TableData,
   ColumnType,
+  ColumnConfig,
+  ColumnOption,
+  Link,
 } from "@/lib/types";
 
 /**
@@ -47,6 +50,15 @@ export const api = {
       })
     ),
 
+  renameBase: async (id: number, name: string): Promise<Base> =>
+    parseJson(
+      await fetch(`/api/bases/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        ...jsonBody({ name }),
+      })
+    ),
+
   deleteBase: async (id: number): Promise<void> => {
     const res = await fetch(`/api/bases/${id}`, { method: "DELETE" });
     await parseJson<void>(res);
@@ -56,10 +68,22 @@ export const api = {
   listTables: async (baseId: number): Promise<Table[]> =>
     parseJson(await fetch(`/api/bases/${baseId}/tables`, { method: "GET" })),
 
+  listAllTables: async (): Promise<Table[]> =>
+    parseJson(await fetch("/api/tables", { method: "GET" })),
+
   createTable: async (baseId: number, name: string): Promise<Table> =>
     parseJson(
       await fetch(`/api/bases/${baseId}/tables`, {
         method: "POST",
+        headers: { "Content-Type": "application/json" },
+        ...jsonBody({ name }),
+      })
+    ),
+
+  renameTable: async (id: number, name: string): Promise<Table> =>
+    parseJson(
+      await fetch(`/api/tables/${id}`, {
+        method: "PATCH",
         headers: { "Content-Type": "application/json" },
         ...jsonBody({ name }),
       })
@@ -71,7 +95,7 @@ export const api = {
   },
 
   getTableData: async (tableId: number): Promise<TableData | null> => {
-    const res = await fetch(`/api/tables/${tableId}`, { method: "GET" });
+    const res = await fetch(`/api/tables/${tableId}?format=raw`, { method: "GET" });
     if (res.status === 404) return null;
     return parseJson<TableData>(res);
   },
@@ -80,18 +104,82 @@ export const api = {
   createColumn: async (
     tableId: number,
     name: string,
-    type: ColumnType
+    type: ColumnType,
+    config?: ColumnConfig,
+    options?: string[]
   ): Promise<Column> =>
     parseJson(
       await fetch(`/api/tables/${tableId}/columns`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        ...jsonBody({ name, type }),
+        ...jsonBody({ name, type, config, options }),
+      })
+    ),
+
+  renameColumn: async (id: number, name: string): Promise<Column> =>
+    parseJson(
+      await fetch(`/api/columns/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        ...jsonBody({ name }),
+      })
+    ),
+
+  setColumnWidth: async (id: number, width: number): Promise<Column> =>
+    parseJson(
+      await fetch(`/api/columns/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        ...jsonBody({ width }),
+      })
+    ),
+
+  setColumnPrimary: async (id: number): Promise<Column> =>
+    parseJson(
+      await fetch(`/api/columns/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        ...jsonBody({ isPrimary: true }),
+      })
+    ),
+
+  reorderColumns: async (tableId: number, columnOrder: number[]): Promise<TableData> =>
+    parseJson(
+      await fetch(`/api/tables/${tableId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        ...jsonBody({ columnOrder }),
       })
     ),
 
   deleteColumn: async (id: number): Promise<void> => {
     const res = await fetch(`/api/columns/${id}`, { method: "DELETE" });
+    await parseJson<void>(res);
+  },
+
+  // Column options (SELECT / MULTI_SELECT)
+  listColumnOptions: async (columnId: number): Promise<ColumnOption[]> =>
+    parseJson(await fetch(`/api/columns/${columnId}/options`, { method: "GET" })),
+
+  addColumnOption: async (
+    columnId: number,
+    value: string,
+    color?: string | null
+  ): Promise<ColumnOption> =>
+    parseJson(
+      await fetch(`/api/columns/${columnId}/options`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        ...jsonBody({ value, color: color ?? null }),
+      })
+    ),
+
+  deleteColumnOption: async (columnId: number, optionId: number): Promise<void> => {
+    const res = await fetch(`/api/columns/${columnId}/options`, {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      ...jsonBody({ optionId }),
+    });
     await parseJson<void>(res);
   },
 
@@ -108,7 +196,7 @@ export const api = {
     await parseJson<void>(res);
   },
 
-  // Cells
+  // Cells (scalar)
   updateCell: async (
     rowId: number,
     columnId: number,
@@ -121,4 +209,40 @@ export const api = {
         ...jsonBody({ rowId, columnId, value }),
       })
     ),
+
+  // Links (LINK column type)
+  addLink: async (
+    linkColumnId: number,
+    sourceRowId: number,
+    targetRowId: number
+  ): Promise<Link> =>
+    parseJson(
+      await fetch("/api/links", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        ...jsonBody({ linkColumnId, sourceRowId, targetRowId }),
+      })
+    ),
+
+  removeLink: async (linkId: number): Promise<void> => {
+    const res = await fetch("/api/links", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      ...jsonBody({ linkId }),
+    });
+    await parseJson<void>(res);
+  },
+
+  removeLinkByEnds: async (
+    linkColumnId: number,
+    sourceRowId: number,
+    targetRowId: number
+  ): Promise<void> => {
+    const res = await fetch("/api/links", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      ...jsonBody({ linkColumnId, sourceRowId, targetRowId }),
+    });
+    await parseJson<void>(res);
+  },
 };

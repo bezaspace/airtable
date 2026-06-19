@@ -77,7 +77,43 @@ async function request(
 // Types — mirrored from src/lib/types.ts + queries.ts to keep CLI standalone
 // ---------------------------------------------------------------------------
 
-export type ColumnType = "TEXT" | "NUMBER";
+export type ColumnType =
+  | "TEXT"
+  | "NUMBER"
+  | "LONG_TEXT"
+  | "CHECKBOX"
+  | "SELECT"
+  | "MULTI_SELECT"
+  | "DATE"
+  | "URL"
+  | "EMAIL"
+  | "LINK"
+  | "LOOKUP"
+  | "ROLLUP";
+
+export interface ColumnConfig {
+  targetTableId?: number;
+  linkColumnId?: number;
+  targetColumnId?: number;
+  aggregation?: "count" | "sum" | "min" | "max" | "avg" | "join";
+}
+
+export interface ColumnOption {
+  id: number;
+  column_id: number;
+  value: string;
+  color: string | null;
+  sort_order: number;
+  created_at: string;
+}
+
+export interface Link {
+  id: number;
+  link_column_id: number;
+  source_row_id: number;
+  target_row_id: number;
+  created_at: string;
+}
 
 export interface Base {
   id: number;
@@ -178,6 +214,8 @@ export const client = {
   listBases: () => request("GET", "/api/bases") as Promise<Base[]>,
   createBase: (name: string) =>
     request("POST", "/api/bases", { name }) as Promise<Base>,
+  renameBase: (id: number, name: string) =>
+    request("PATCH", `/api/bases/${id}`, { name }) as Promise<Base>,
   deleteBase: (id: number) => request("DELETE", `/api/bases/${id}`),
   deleteBases: (ids: number[]) =>
     request("DELETE", "/api/bases", { ids }) as Promise<BulkDeleteResult>,
@@ -195,28 +233,70 @@ export const client = {
     >,
   createTable: (baseId: number, name: string) =>
     request("POST", `/api/bases/${baseId}/tables`, { name }) as Promise<Table>,
+  renameTable: (id: number, name: string) =>
+    request("PATCH", `/api/tables/${id}`, { name }) as Promise<Table>,
+  reorderColumns: (tableId: number, columnOrder: number[]) =>
+    request("PATCH", `/api/tables/${tableId}`, { columnOrder }) as Promise<unknown>,
   deleteTable: (id: number) => request("DELETE", `/api/tables/${id}`),
   deleteTables: (ids: number[]) =>
     request("DELETE", "/api/tables", { ids }) as Promise<BulkDeleteResult>,
+  listAllTables: () => request("GET", "/api/tables") as Promise<Table[]>,
 
   // Columns
-  createColumn: (tableId: number, name: string, type: ColumnType) =>
+  createColumn: (
+    tableId: number,
+    name: string,
+    type: ColumnType,
+    config?: ColumnConfig,
+    options?: string[]
+  ) =>
     request("POST", `/api/tables/${tableId}/columns`, {
       name,
       type,
+      config,
+      options,
     }) as Promise<Column>,
   createColumnsBulk: (
     tableId: number,
-    columns: { name: string; type: ColumnType }[]
+    columns: { name: string; type: ColumnType; config?: ColumnConfig; options?: string[] }[]
   ) =>
     request("POST", `/api/tables/${tableId}/columns`, {
       columns,
     }) as Promise<Column[]>,
+  renameColumn: (id: number, name: string) =>
+    request("PATCH", `/api/columns/${id}`, { name }) as Promise<Column>,
+  setColumnWidth: (id: number, width: number) =>
+    request("PATCH", `/api/columns/${id}`, { width }) as Promise<Column>,
+  setColumnPrimary: (id: number) =>
+    request("PATCH", `/api/columns/${id}`, { isPrimary: true }) as Promise<Column>,
   deleteColumn: (id: number) => request("DELETE", `/api/columns/${id}`),
   deleteColumns: (tableId: number, ids: number[]) =>
     request("DELETE", `/api/tables/${tableId}/columns`, {
       ids,
     }) as Promise<BulkDeleteResult>,
+
+  // Column options (SELECT / MULTI_SELECT)
+  listColumnOptions: (columnId: number) =>
+    request("GET", `/api/columns/${columnId}/options`) as Promise<ColumnOption[]>,
+  addColumnOption: (columnId: number, value: string, color?: string | null) =>
+    request("POST", `/api/columns/${columnId}/options`, {
+      value,
+      color: color ?? null,
+    }) as Promise<ColumnOption>,
+  deleteColumnOption: (columnId: number, optionId: number) =>
+    request("DELETE", `/api/columns/${columnId}/options`, { optionId }),
+
+  // Links (LINK column type)
+  addLink: (linkColumnId: number, sourceRowId: number, targetRowId: number) =>
+    request("POST", "/api/links", { linkColumnId, sourceRowId, targetRowId }) as Promise<Link>,
+  removeLink: (linkId: number) =>
+    request("DELETE", "/api/links", { linkId }),
+  removeLinkByEnds: (
+    linkColumnId: number,
+    sourceRowId: number,
+    targetRowId: number
+  ) =>
+    request("DELETE", "/api/links", { linkColumnId, sourceRowId, targetRowId }),
 
   // Rows
   createRow: (tableId: number) =>

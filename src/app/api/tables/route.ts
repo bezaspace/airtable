@@ -1,5 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
-import { deleteTables } from "@/lib/queries";
+import { deleteTables, listAllTables } from "@/lib/queries";
+
+/**
+ * GET /api/tables
+ * Lists all tables across all bases (used for LINK column target selection).
+ */
+export async function GET() {
+  return NextResponse.json(listAllTables());
+}
 
 /**
  * DELETE /api/tables { ids: [1,2,3] }
