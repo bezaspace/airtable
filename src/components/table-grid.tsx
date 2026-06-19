@@ -573,8 +573,15 @@ export function TableGrid({ initialData }: TableGridProps) {
       )}
 
       {/* Grid */}
-      <div className="flex-1 overflow-auto">
-        <table className="w-full border-collapse text-sm">
+      {/* Outer container handles horizontal scroll so its scrollbar stays
+          pinned to the bottom of the viewport (always visible). The inner
+          container handles vertical scroll, keeping the sticky header working.
+          `w-max min-w-full` makes the inner div exactly as wide as the table
+          (but never narrower than the viewport) so horizontal overflow is
+          pushed to the outer container instead of being clipped. */}
+      <div className="flex-1 overflow-x-auto overflow-y-hidden">
+        <div className="h-full overflow-y-auto w-max min-w-full">
+        <table className="border-collapse text-sm">
           <thead className="sticky top-0 z-20 bg-card">
             <tr>
               <th className="w-10 border-b border-r border-border bg-muted/50"></th>
@@ -817,6 +824,7 @@ export function TableGrid({ initialData }: TableGridProps) {
             ))}
           </tbody>
         </table>
+        </div>
       </div>
     </div>
   );
